@@ -1,13 +1,16 @@
 import java.io.*;
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.net.URISyntaxException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.logging.Handler;
 
 public class Server {
     List<String> validPaths = List.of(
@@ -46,38 +49,39 @@ public class Server {
     }
 
     private void handleClient(Socket socket) {
-        try (socket;
-             BufferedReader in = new BufferedReader(new InputStreamReader(socket.getInputStream(), StandardCharsets.UTF_8));
-             OutputStream out = socket.getOutputStream()) {
+        try (final var in = new BufferedInputStream(socket.getInputStream());
+             final var out = new BufferedOutputStream(socket.getOutputStream())) {
 
-            String requestLine = in.readLine();
-            String[] parts = requestLine.split(" ");
+            Request request = Request.getRequest(in, out);
 
-            if (parts.length != 3) {
-                // just close socket
-                return;
-            }
-
-            String path = parts[1];
-
-            // Чтение заголовков
-            String header;
-            while ((header = in.readLine()) != null && !header.isEmpty()) {
-                // Можно обработать заголовки если нужно
-            }
-
-            if (!validPaths.contains(path)) {
+            if (request == null) {
                 out.write((
-                        "HTTP/1.1 404 Not Found\r\n" +
+                        "HTTP/1.1 400 Bad Request\r\n" +
                                 "Content-Length: 0\r\n" +
                                 "Connection: close\r\n" +
                                 "\r\n"
                 ).getBytes());
                 out.flush();
-                return;
             }
+        } catch (IOException | URISyntaxException e) {
+            throw new RuntimeException(e);
+        }
+    }
 
-            final var filePath = Path.of(".", "public", path);
+
+    void defaultHandler(BufferedOutputStream out, String path) throws IOException {
+        if (!validPaths.contains(path)) {
+            out.write((
+                    "HTTP/1.1 404 Not Found\r\n" +
+                            "Content-Length: 0\r\n" +
+                            "Connection: close\r\n" +
+                            "\r\n"
+            ).getBytes());
+            out.flush();
+            return;
+        }
+
+        final var filePath = Path.of(".", "public", path);
             final var mimeType = Files.probeContentType(filePath);
 
             // special case for classic
@@ -110,8 +114,6 @@ public class Server {
             Files.copy(filePath, out);
             out.flush();
 
-        } catch (IOException e) {
-            e.printStackTrace();
-        }
+
     }
 }
